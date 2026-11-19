@@ -49,6 +49,7 @@ class CallRecord:
     })
     recording_path: str | None = None
     recording_url: str | None = None
+    twilio_recording_sid: str | None = None   # measurement only (TWILIO_DUAL_RECORDING)
     cost: dict[str, Any] | None = None
     webhook: dict[str, Any] | None = None   # result of POSTing the summary
 

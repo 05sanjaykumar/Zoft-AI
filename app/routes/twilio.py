@@ -23,12 +23,13 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
+from twilio.rest import Client
 from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from app.calls import store
 from app.calls.defaults import default_inbound_config
 from app.calls.finalize import finalize
-from app.config import PUBLIC_HOST, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
+from app.config import PUBLIC_HOST, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_DUAL_RECORDING
 from app.voice.call_controls import max_duration_timer
 from app.voice.pipeline import build_call_task
 
@@ -95,6 +96,18 @@ async def status_callback(request: Request):
             else:
                 store.save(record)
     return {"ok": True}
+
+
+async def _start_twilio_recording(record, call_sid: str) -> None:
+    """Measurement only (TWILIO_DUAL_RECORDING=true): record the call at Twilio."""
+    try:
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        rec = await asyncio.to_thread(
+            client.calls(call_sid).recordings.create, recording_channels="dual")
+        record.twilio_recording_sid = rec.sid
+        logger.info(f"[{record.id}] Twilio dual-channel recording {rec.sid} started")
+    except Exception as exc:  # measurement must never break a call
+        logger.warning(f"[{record.id}] could not start Twilio recording: {exc}")
 
 
 # ---------------------------------------------------------- the media stream
@@ -166,6 +179,8 @@ async def twilio_stream(websocket: WebSocket):
         record.started_at = time.time()
         store.TASKS[record.id] = task
         logger.info(f"Call {record.id} connected ({record.direction})")
+        if TWILIO_DUAL_RECORDING and call_sid:
+            asyncio.create_task(_start_twilio_recording(record, call_sid))
         timer = asyncio.create_task(max_duration_timer(task, record))
         try:
             await PipelineRunner(handle_sigint=False).run(task)

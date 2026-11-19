@@ -40,6 +40,10 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 # Public host Twilio reaches us on, without the scheme (an ngrok host in dev).
 PUBLIC_HOST = (os.getenv("PUBLIC_HOST") or "").replace("https://", "").replace("http://", "").rstrip("/")
+# Measurement only: ask Twilio for a dual-channel recording of each call, made
+# at Twilio's edge. Compared with our own recording it gives the Twilio <->
+# server round trip for the latency report. Costs $0.0025/min.
+TWILIO_DUAL_RECORDING = os.getenv("TWILIO_DUAL_RECORDING", "false").lower() == "true"
 
 # ------------------------------------------------------------------ mock clinic
 CLINIC_DB_PATH = Path(os.getenv("CLINIC_DB_PATH", DATA_DIR / "clinic.db"))

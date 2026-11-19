@@ -161,9 +161,21 @@ server ₹0.05, TTS ₹0. Prices and their sources are in [pricing.json](pricing
 
 **Next:**
 
-- [ ] Knowledge base lookup tool over `knowledge/clinic-faq.md`
-- [ ] Real phone calls: 30+ measured turns, 10 interruptions
-- [ ] REPORT.md, DESIGN.md, demo video
+- [ ] Real phone calls: 30+ measured turns, 10 interruptions → fill the PENDING sections of [REPORT.md](REPORT.md)
+- [ ] Demo video
+- Knowledge base: optional in the brief and not built; `knowledge/clinic-faq.md` is the document it would use.
+
+## Measuring (for REPORT.md)
+
+```bash
+# in .env for measurement calls only: Twilio records each call at its edge ($0.0025/min)
+TWILIO_DUAL_RECORDING=true
+
+python tools/measure.py latency --since 2026-11-20      # median / p95 per stage, plain vs tool turns
+python tools/measure.py audio data/recordings/<id>.wav  # reply gaps and interruption stop times
+python tools/measure.py twilio <id>                     # adds the Twilio <-> server round trip
+python tools/cost_model.py                              # 1,000 calls/day x 3 min, raw and realistic, in ₹
+```
 
 **Latency findings so far (fake calls, local machine, server side):**
 
