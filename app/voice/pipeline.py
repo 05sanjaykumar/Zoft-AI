@@ -1,6 +1,6 @@
 """Assemble one call's pipeline from its config.
 
-    caller audio -> VAD -> STT -> user turn -> LLM (+ HTTP tools) -> TTS -> caller
+    caller audio -> VAD -> STT -> user turn -> LLM (+ tools) -> TTS -> caller
 
 The transport is passed in, so the same builder serves a real Twilio call and
 the fake Twilio client in tools/fake_twilio_call.py.
@@ -26,8 +26,16 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from app.calls.store import CallRecord
 from app.config import USER_SPEECH_TIMEOUT
+from app.voice.call_controls import (
+    END_CALL_RULES,
+    InactivityMonitor,
+    ReplyTextWatcher,
+    build_end_call_tool,
+    install_filler,
+)
 from app.voice.http_tools import build_http_tools
 from app.voice.services import get_llm, get_stt, get_tts
+from app.voice.turns import BackchannelAwareStartStrategy
 
 CLINIC_TZ = ZoneInfo("Asia/Kolkata")
 VAD_STOP_SECS = 0.2
@@ -43,7 +51,7 @@ If a tool returns an error, say so plainly and offer another option.
 def system_prompt(record: CallRecord) -> str:
     now = datetime.now(CLINIC_TZ)
     today = f"Today is {now:%A}, {now:%d %B %Y}. Dates for tools are YYYY-MM-DD."
-    return f"{record.config.systemPrompt}\n\n{today}\n\n{VOICE_RULES}"
+    return f"{record.config.systemPrompt}\n\n{today}\n\n{VOICE_RULES}\n\n{END_CALL_RULES}"
 
 
 def build_call_task(transport, record: CallRecord,
@@ -53,9 +61,10 @@ def build_call_task(transport, record: CallRecord,
     llm = get_llm(config)
     tts = get_tts(config)
 
+    tools = build_http_tools(config.tools, record, client) + [build_end_call_tool(record)]
     context = LLMContext(
         messages=[{"role": "system", "content": system_prompt(record)}],
-        tools=build_http_tools(config.tools, record, client) or None,
+        tools=tools,
     )
 
     # A phone sends only audio, no speech events, so turn boundaries come from
@@ -69,23 +78,29 @@ def build_call_task(transport, record: CallRecord,
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
+                # Words, not voice activity, start a turn: a cough or an
+                # "mm-hmm" never interrupts the agent (app/voice/turns.py).
+                start=[BackchannelAwareStartStrategy()],
                 stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=USER_SPEECH_TIMEOUT)],
             ),
             vad_analyzer=vad,
+            user_idle_timeout=config.inactivity.afterSeconds,
         ),
     )
 
+    watcher = ReplyTextWatcher()
     pipeline = Pipeline([
         transport.input(),
         stt,
         aggregators.user(),
         llm,
+        watcher,
         tts,
         transport.output(),
         aggregators.assistant(),
     ])
 
-    return PipelineTask(
+    task = PipelineTask(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
@@ -95,3 +110,7 @@ def build_call_task(transport, record: CallRecord,
             enable_usage_metrics=True,
         ),
     )
+
+    install_filler(llm, record, watcher)
+    InactivityMonitor(task, record).install(aggregators.user())
+    return task

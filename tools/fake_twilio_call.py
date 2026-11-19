@@ -77,7 +77,8 @@ async def run(url: str, caller: str, seconds: float, speech: str | None,
         print(f"→ stream {stream_sid} opened as {caller}")
 
         outbound: list[bytes] = []
-        stop_at = time.monotonic() + seconds
+        started = time.monotonic()
+        stop_at = started + seconds
         inbound_audio = _speech_chunks(speech) if speech else None
 
         async def feed():
@@ -90,14 +91,18 @@ async def run(url: str, caller: str, seconds: float, speech: str | None,
                 chunk = SILENCE
                 if inbound_audio is not None and time.monotonic() >= speak_at:
                     chunk = next(inbound_audio, SILENCE)
-                await ws.send(json.dumps({
-                    "event": "media",
-                    "sequenceNumber": str(seq),
-                    "streamSid": stream_sid,
-                    "media": {"track": "inbound", "chunk": str(seq),
-                              "timestamp": str(seq * CHUNK_MS),
-                              "payload": base64.b64encode(chunk).decode()},
-                }))
+                try:
+                    await ws.send(json.dumps({
+                        "event": "media",
+                        "sequenceNumber": str(seq),
+                        "streamSid": stream_sid,
+                        "media": {"track": "inbound", "chunk": str(seq),
+                                  "timestamp": str(seq * CHUNK_MS),
+                                  "payload": base64.b64encode(chunk).decode()},
+                    }))
+                except websockets.ConnectionClosed:
+                    print(f"← the agent ended the call after {time.monotonic() - started:.1f}s")
+                    break
                 seq += 1
                 await asyncio.sleep(CHUNK_MS / 1000)
 

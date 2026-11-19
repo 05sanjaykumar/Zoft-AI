@@ -128,23 +128,33 @@ HTTP errors and timeouts to the model. No test places a real call.
 
 ## Status
 
-**Working (verified on a fake Twilio call):** inbound webhook and media stream, agent-first greeting,
+**Working (verified on fake Twilio calls):** inbound webhook and media stream, agent-first greeting,
 streaming STT → LLM → TTS, `check_slots` called mid-call with the right date, mock clinic with the
 double-booking guard, `POST /calls` (inbound config + outbound dial), `GET /calls/:id`,
-`POST /calls/:id/end`, Twilio status callback, tool runs logged on the call.
+`POST /calls/:id/end`, Twilio status callback, tool runs logged on the call, and the call controls below.
 
-**Not verified yet:** outbound dialling on a real number, and the Hindi voice by ear.
+| Control | How | Fake-call result |
+| --- | --- | --- |
+| Interruptions | Words from interim transcripts start a turn, not voice activity; backchannels are ignored while the agent talks ([app/voice/turns.py](app/voice/turns.py)) | "Mm hmm" over the greeting: no interruption. "Wait, sorry…": agent quiet 0.17s after speech was detected |
+| Filler during tools | `on_function_calls_started` speaks "Let me check that." unless the model already said something; kept out of the history | One filler, then the answer |
+| Agent hang-up | `end_call` tool; its argument is the closing line, then an end frame flushes behind it | Closing line played in full, then the call ended |
+| Inactivity | Pipecat idle event: check-in at `afterSeconds`, goodbye and hang-up when the silence reaches `hangUpAfterSeconds` (counted from the end of the check-in) | Check-in at 3s, hang-up 4s after it (config 3s / 7s) |
+| Max duration | Timer from stream start, ends with a closing line | Ended at 8s (config 8s) after the line played |
+
+Twilio hangs up only after the last line finishes ("Bot stopped speaking" comes before the end frame in the logs).
+
+**Not verified yet:** any of this on a real phone line, outbound dialling, and the Hindi voice by ear.
 
 **Next:**
 
-- [ ] Filler line while a tool runs (`on_function_calls_started`)
-- [ ] Interruptions that ignore "mm-hmm" (`MinWordsUserTurnStartStrategy`), then measure
-- [ ] `end_call` tool: hang up after a closing line
-- [ ] Inactivity prompt and hang-up (`on_user_turn_idle`), max duration timer
 - [ ] Recording, timestamped transcript per turn, cost breakdown, POST to `webhookUrl`
 - [ ] Knowledge base lookup tool over `knowledge/clinic-faq.md`
 - [ ] Per-turn latency log (`UserBotLatencyObserver`), median and p95
 - [ ] REPORT.md, DESIGN.md, demo video
 
-**First latency finding:** Kokoro's time to first audio was about 2.8s per line on the fake call
-(MediConnect measured 0.46s). That is the first thing to investigate.
+**Latency findings so far (fake calls, local machine):**
+
+- Kokoro's time to first audio grows with line length: about 2.8s for a full sentence, 0.42s for one word
+  (MediConnect measured 0.46s). The first thing to fix.
+- On a tool turn, the model's answer waits about 1.8s for the filler line to finish playing.
+- STT time to first byte about 0.78s, Groq LLM 0.45–1.1s, `check_slots` 16–34 ms.

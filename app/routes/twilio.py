@@ -8,6 +8,7 @@
 3. Twilio reports call progress to POST /twilio/status (outbound calls).
 """
 
+import asyncio
 import json
 import time
 
@@ -27,6 +28,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 from app.calls import store
 from app.calls.defaults import default_inbound_config
 from app.config import PUBLIC_HOST, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
+from app.voice.call_controls import max_duration_timer
 from app.voice.pipeline import build_call_task
 
 router = APIRouter(prefix="/twilio", tags=["telephony"])
@@ -157,9 +159,11 @@ async def twilio_stream(websocket: WebSocket):
         record.started_at = time.time()
         store.TASKS[record.id] = task
         logger.info(f"Call {record.id} connected ({record.direction})")
+        timer = asyncio.create_task(max_duration_timer(task, record))
         try:
             await PipelineRunner(handle_sigint=False).run(task)
         finally:
+            timer.cancel()
             store.TASKS.pop(record.id, None)
             record.ended_at = record.ended_at or time.time()
             if record.status not in store.FINAL_STATUSES:

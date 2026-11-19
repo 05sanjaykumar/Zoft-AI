@@ -55,4 +55,8 @@ class CallConfig(BaseModel):
         names = [t.name for t in self.tools]
         if len(names) != len(set(names)):
             raise ValueError("tool names must be unique")
+        if "end_call" in names:
+            raise ValueError("'end_call' is built in; use another tool name")
+        if self.inactivity.hangUpAfterSeconds <= self.inactivity.afterSeconds:
+            raise ValueError("inactivity.hangUpAfterSeconds must be greater than afterSeconds")
         return self
