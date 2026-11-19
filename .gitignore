@@ -1,0 +1,24 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Runtime data: call records, clinic database, webhook log, recordings
+data/
+recordings/
+*.wav
+
+# The assignment brief stays local
+*.pdf
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
