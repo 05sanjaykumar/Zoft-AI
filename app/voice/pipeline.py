@@ -24,6 +24,7 @@ from pipecat.turns.user_stop.speech_timeout_user_turn_stop_strategy import (
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
+from app.calls.recorder import CallRecorder
 from app.calls.store import CallRecord
 from app.config import USER_SPEECH_TIMEOUT
 from app.voice.call_controls import (
@@ -89,6 +90,7 @@ def build_call_task(transport, record: CallRecord,
     )
 
     watcher = ReplyTextWatcher()
+    recorder = CallRecorder(record)
     pipeline = Pipeline([
         transport.input(),
         stt,
@@ -97,6 +99,7 @@ def build_call_task(transport, record: CallRecord,
         watcher,
         tts,
         transport.output(),
+        recorder.audio,          # sees caller audio and agent audio as played
         aggregators.assistant(),
     ])
 
@@ -109,8 +112,10 @@ def build_call_task(transport, record: CallRecord,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=recorder.observers,
     )
 
     install_filler(llm, record, watcher)
     InactivityMonitor(task, record).install(aggregators.user())
+    recorder.install(aggregators.user(), aggregators.assistant())
     return task

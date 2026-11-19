@@ -58,6 +58,7 @@ calls only reach verified numbers. A free ngrok URL changes on restart, so steps
 | `GET` | `/calls` | Recent calls |
 | `GET` | `/calls/{id}` | Status, duration, transcript, recording link, tool runs, cost |
 | `POST` | `/calls/{id}/end` | Hang up a live call (or cancel one still ringing) |
+| `GET` | `/calls/{id}/recording` | Stereo WAV: caller left, agent right |
 | `POST` | `/twilio/voice` | Twilio webhook: returns TwiML that opens the media stream |
 | `POST` | `/twilio/status` | Twilio status callback (ringing, completed, no-answer…) |
 | `WS` | `/twilio/stream` | Twilio media stream |
@@ -103,13 +104,19 @@ app/
   config.py            settings from .env
   schemas.py           the POST /calls body (CallConfig)
   calls/store.py       call records (memory + data/calls/*.json), inbound config
+  calls/recorder.py    recording, per-turn transcript, per-turn latency, usage
+  calls/costs.py       cost per component from usage x pricing.json
+  calls/finalize.py    at call end: cost, save, POST summary to webhookUrl
   routes/calls.py      /calls API
   routes/twilio.py     Twilio webhook, status callback, media stream
   voice/pipeline.py    builds one call's Pipecat pipeline from its config
   voice/services.py    STT, LLM, TTS (with the clause chunker)
   voice/http_tools.py  config tools → HTTP calls, errors and timeouts returned to the model
   voice/voices.py      voice and language mapping
+  voice/turns.py       interruption rule: words, not voice activity; backchannels ignored
+  voice/call_controls.py  filler, end_call, inactivity, max duration
   clinic/              mock clinic: SQLite bookings table, UNIQUE (date, time)
+pricing.json           list prices with their source pages
 examples/              create-call bodies
 knowledge/clinic-faq.md  knowledge base document (lookup not wired yet)
 tools/fake_twilio_call.py
@@ -143,18 +150,26 @@ double-booking guard, `POST /calls` (inbound config + outbound dial), `GET /call
 
 Twilio hangs up only after the last line finishes ("Bot stopped speaking" comes before the end frame in the logs).
 
+**After the call** (verified on a fake booking call): `GET /calls/{id}` and the webhook carry a
+per-turn transcript with timestamps, every tool run with inputs, result and time, a stereo recording,
+per-turn latency (caller stopped → agent's first audio, split into STT / LLM / TTS / tools), usage
+(tokens, audio seconds, characters) and a cost breakdown per component in rupees. A 39-second
+inbound booking call cost ₹1.60: telephony ₹1.20 (one billed minute), STT ₹0.28, LLM ₹0.07,
+server ₹0.05, TTS ₹0. Prices and their sources are in [pricing.json](pricing.json).
+
 **Not verified yet:** any of this on a real phone line, outbound dialling, and the Hindi voice by ear.
 
 **Next:**
 
-- [ ] Recording, timestamped transcript per turn, cost breakdown, POST to `webhookUrl`
 - [ ] Knowledge base lookup tool over `knowledge/clinic-faq.md`
-- [ ] Per-turn latency log (`UserBotLatencyObserver`), median and p95
+- [ ] Real phone calls: 30+ measured turns, 10 interruptions
 - [ ] REPORT.md, DESIGN.md, demo video
 
-**Latency findings so far (fake calls, local machine):**
+**Latency findings so far (fake calls, local machine, server side):**
 
-- Kokoro's time to first audio grows with line length: about 2.8s for a full sentence, 0.42s for one word
-  (MediConnect measured 0.46s). The first thing to fix.
-- On a tool turn, the model's answer waits about 1.8s for the filler line to finish playing.
-- STT time to first byte about 0.78s, Groq LLM 0.45–1.1s, `check_slots` 16–34 ms.
+- Caller stopped → agent's first audio: 1.9–2.5s on the booking call's three replies. About 1.0s of
+  that is turn detection (0.2s VAD + 0.8s speech timeout).
+- Kokoro's time to first audio varied from 0.45s to 2.8s across runs (one word: 0.42s). Line length,
+  CPU contention and warm-up are the suspects; to be measured.
+- On a tool turn, the model's answer waits for the filler line to finish playing (about 1.8s once).
+- STT 0.26–0.78s, Groq LLM 0.24–1.1s, `check_slots` / `book_slot` 16–34 ms.

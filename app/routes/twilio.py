@@ -27,6 +27,7 @@ from twilio.twiml.voice_response import Connect, VoiceResponse
 
 from app.calls import store
 from app.calls.defaults import default_inbound_config
+from app.calls.finalize import finalize
 from app.config import PUBLIC_HOST, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
 from app.voice.call_controls import max_duration_timer
 from app.voice.pipeline import build_call_task
@@ -86,7 +87,13 @@ async def status_callback(request: Request):
             record.status = status
         if status in store.FINAL_STATUSES:
             record.ended_at = record.ended_at or time.time()
-            store.save(record)
+            if record.started_at is None:
+                # Never connected (no-answer, busy, failed): no stream will
+                # finalize it, so do it here. A connected call is finalized
+                # when its stream closes.
+                await finalize(record)
+            else:
+                store.save(record)
     return {"ok": True}
 
 
@@ -168,5 +175,5 @@ async def twilio_stream(websocket: WebSocket):
             record.ended_at = record.ended_at or time.time()
             if record.status not in store.FINAL_STATUSES:
                 record.status = "completed"
-            store.save(record)
             logger.info(f"Call {record.id} ended after {record.duration_seconds}s")
+            await finalize(record, client)

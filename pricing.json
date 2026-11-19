@@ -1,0 +1,52 @@
+{
+  "as_of": "2026-11-19",
+  "notes": "List prices, opened on the official pages on the as_of date. Every rate is per unit in USD unless marked. Change a number here; the code reads this file.",
+  "usd_inr": {
+    "rate": 93.3461,
+    "source": "https://www.rbi.org.in/",
+    "note": "FBIL reference rate, 2026-11-19, 1:00 pm IST"
+  },
+  "telephony": {
+    "inbound_per_min_usd": 0.0129,
+    "outbound_per_min_usd": 0.054,
+    "billing": "per started minute",
+    "breakdown": {
+      "inbound_us_local_per_min": 0.0085,
+      "outbound_to_india_mobile_per_min": 0.0496,
+      "media_streams_per_min": 0.0044,
+      "us_local_number_per_month": 1.15
+    },
+    "sources": [
+      "https://www.twilio.com/en-us/voice/pricing/us",
+      "https://www.twilio.com/en-us/voice/pricing/in"
+    ],
+    "note": "Rates above = call leg + Media Streams. The number's monthly fee is a fixed cost, not per call. Recording uses our own WAV, not Twilio recording ($0.0025/min)."
+  },
+  "stt": {
+    "per_min_usd": 0.0048,
+    "provider": "Deepgram Nova-3 streaming (English), pay as you go",
+    "source": "https://deepgram.com/pricing",
+    "note": "We use NVIDIA nemotron-asr-streaming, which is a free trial service with no per-minute price (production needs an NVIDIA AI Enterprise licence, $4,500 per GPU per year, plus the GPU). Deepgram is the list price of an equivalent paid streaming STT. Its page marks this as a promo price (earlier $0.0077)."
+  },
+  "llm": {
+    "model": "openai/gpt-oss-120b on Groq",
+    "input_per_mtok_usd": 0.15,
+    "cached_input_per_mtok_usd": 0.075,
+    "output_per_mtok_usd": 0.6,
+    "source": "https://console.groq.com/docs/models",
+    "cache_source": "https://console.groq.com/docs/prompt-caching",
+    "note": "Cached input tokens get 50% off. groq.com/pricing renders with JavaScript, so the rates were read from Groq's model docs."
+  },
+  "tts": {
+    "per_char_usd": 0.0,
+    "provider": "Kokoro, self-hosted",
+    "note": "No per-character fee; its CPU time is in the server line. Hosted references: Cartesia Sonic $38-65 per 1M characters (https://cartesia.ai/pricing), ElevenLabs Flash $0.04 per 1K (https://elevenlabs.io/pricing/api)."
+  },
+  "server": {
+    "instance": "AWS EC2 c7i.large (2 vCPU, 4 GiB), Mumbai ap-south-1, Linux on-demand",
+    "per_hour_usd": 0.08925,
+    "concurrent_calls": 2,
+    "source": "https://aws.amazon.com/ec2/pricing/on-demand/",
+    "note": "concurrent_calls is an assumption, not measured: Kokoro synthesis is CPU-bound, so 2 calls per 2-vCPU VM is the conservative starting point."
+  }
+}

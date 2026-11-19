@@ -7,7 +7,10 @@
     POST /calls/{id}/end   hang up a live call
 """
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from loguru import logger
 from twilio.rest import Client
 
@@ -79,6 +82,16 @@ def get_call(call_id: str):
     if record is None:
         raise HTTPException(404, "No such call")
     return record.to_public()
+
+
+@router.get("/{call_id}/recording")
+def get_recording(call_id: str):
+    record = store.get(call_id)
+    if record is None or not record.recording_path or not Path(record.recording_path).exists():
+        raise HTTPException(404, "No recording for this call")
+    # Stereo WAV: caller on the left channel, agent on the right.
+    return FileResponse(record.recording_path, media_type="audio/wav",
+                        filename=f"call-{call_id}.wav")
 
 
 @router.post("/{call_id}/end")

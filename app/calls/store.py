@@ -36,12 +36,21 @@ class CallRecord:
     started_at: float | None = None   # media stream connected
     ended_at: float | None = None
     end_reason: str | None = None
-    # One entry per turn: {"role", "text", "start", "end"} (seconds since epoch).
+    # One entry per turn: {"role", "text", "start", "end", "t_start", "t_end"};
+    # start/end are epoch seconds, t_* are seconds since the call connected.
     transcript: list[dict[str, Any]] = field(default_factory=list)
     # One entry per tool run: {"name", "arguments", "result", "ok", "ms", "at"}.
     tools: list[dict[str, Any]] = field(default_factory=list)
+    # One entry per agent reply: total caller-stopped -> agent-audio, plus TTFBs.
+    latency: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, float] = field(default_factory=lambda: {
+        "llm_prompt_tokens": 0, "llm_completion_tokens": 0, "llm_cached_tokens": 0,
+        "llm_calls": 0, "stt_audio_seconds": 0.0, "tts_characters": 0,
+    })
+    recording_path: str | None = None
     recording_url: str | None = None
     cost: dict[str, Any] | None = None
+    webhook: dict[str, Any] | None = None   # result of POSTing the summary
 
     @property
     def duration_seconds(self) -> float | None:
