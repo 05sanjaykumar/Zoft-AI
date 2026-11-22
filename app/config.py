@@ -25,6 +25,12 @@ LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low")
 
 # ------------------------------------------------------------------------ STT
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+# "nvidia" (nemotron-asr-streaming, default) or "deepgram" (Nova-2, en-IN).
+# Deepgram was tried on real calls on 2026-11-22: it scored better on replayed
+# clips, but on live calls the caller found NVIDIA clearly more accurate, so
+# NVIDIA stayed. Deepgram remains one setting away.
+STT_PROVIDER = (os.getenv("STT_PROVIDER") or "nvidia").lower()
 
 # ------------------------------------------------------------------------ TTS
 # Kokoro runs locally (needs espeak-ng). Used when a call's voice is unmapped.

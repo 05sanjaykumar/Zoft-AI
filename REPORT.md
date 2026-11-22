@@ -6,7 +6,11 @@ after the fact.
 
 Setup for all measurements: the server on one MacBook (Apple Silicon, CPU only) behind ngrok,
 Twilio trial account with a US number, Groq `openai/gpt-oss-120b` (reasoning effort low), NVIDIA
-`nemotron-asr-streaming`, Kokoro TTS locally, Silero VAD at 0.2s with a 0.8s speech timeout.
+`nemotron-asr-streaming` for speech-to-text, Kokoro TTS locally, Silero VAD at 0.2s with a 0.8s speech
+timeout. Deepgram (Nova-3, then Nova-2, en-IN) was tried on real calls on 2026-11-22. Replayed clips
+favoured Nova-2 (words wrong: Nova-2 20%, NVIDIA 28%, Nova-3 36%; 10 utterances, 2 runs), but on live
+calls NVIDIA was clearly more accurate for this caller, so NVIDIA stayed; `STT_PROVIDER=deepgram`
+switches. Real-call numbers below are from NVIDIA calls.
 
 ---
 
@@ -45,9 +49,15 @@ Twilio trial account with a US number, Groq `openai/gpt-oss-120b` (reasoning eff
 Same columns, for turns that call `check_slots` / `book_slot`, plus tool HTTP time and the time to
 the answer after the filler.
 
-### Knowledge-base turn
+### Knowledge-base turn: PENDING REAL CALLS
 
-Not built (optional in the brief). See section 4.
+Turns that call `lookup_knowledge` ("what are your hours?", "how much is a cleaning?"). The lookup
+is a keyword search over the FAQ's sections in the server process, so its own time is under 1 ms
+(logged per run in `tools[].ms`). What it adds is the second model call that reads the result, so
+the report gives LLM time on knowledge turns next to plain turns. No filler line is played for it.
+
+Preliminary (two fake calls, one reply each): total 3.75s and 5.51s; LLM (both model calls)
+0.82s and 1.83s; TTS first audio 1.76s and 2.45s; lookup 0.28 ms and 0.66 ms.
 
 ### Preliminary (fake Twilio client on the same machine, not a real call)
 
@@ -131,9 +141,19 @@ GPU), engineering and on-call time.
 | --- | --- | --- | --- | --- |
 | 1–10 | | | | |
 
-Preliminary (fake client): over a long greeting, "Mm hmm" did not interrupt; "Wait, sorry, can I ask
-something?" did, 0.17s after the server detected speech. Measured on the audio from the caller's
-first sound, two overlaps in a fake booking call went quiet after 0.44s and 0.62s.
+**Why the rule changed after the first real calls.** The first version interrupted only on words
+from the recogniser, so a cough or "mm-hmm" never stopped the agent. On real calls that was too slow:
+
+- At Twilio's edge, the agent went quiet 1.2-1.7s after the caller started talking, and one short
+  "hello" said over a time offer never stopped it.
+- Fed the same audio offline, the hosted NVIDIA recogniser returned its first word 1.0-1.3s after
+  the caller started, and turned that "hello" into "N".
+- Silero VAD with Pipecat's defaults (confidence 0.7, min volume 0.6) missed 2 of the call's 9
+  caller utterances. At confidence 0.5 and min volume 0.2 it caught all 9, about 0.25s in.
+
+So voice now interrupts, and words are the backup. The cost: an "mm-hmm" stops the agent too. If a
+turn ends with no words (a cough), the agent resumes its reply instead of going silent. The proper
+fix, not built: pause on voice and resume if the words turn out to be a backchannel.
 
 ---
 

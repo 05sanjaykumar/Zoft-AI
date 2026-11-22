@@ -1,22 +1,25 @@
-"""When the caller's speech counts as an interruption.
+"""When the caller's speech starts a turn (and so interrupts the agent).
 
-Pipecat's default starts a user turn (and so interrupts the agent) on voice
-activity alone, which means a cough or an "mm-hmm" stops the agent mid-word.
-This strategy waits for words from the transcript instead:
+Voice starts a turn: Silero VAD reports speech, the agent stops. Measured on a
+real call, the hosted NVIDIA recogniser needs 1.0-1.3s to return a first word
+and turned one short "hello" into "N", so a words-only rule (what this file
+did first) left the agent talking for 1.2-1.7s, or never stopped it. VAD,
+tuned for 8 kHz phone audio, caught every utterance on that call ~0.25s in.
 
-* While the agent is speaking, backchannels ("mm-hmm", "yeah", "okay") are
-  ignored. One real word ("wait", "no", "Tuesday") interrupts at once, and so
-  do three words of anything.
-* While the agent is silent, any word starts the caller's turn, so a plain
-  "yeah" still answers a question.
+The cost: an "mm-hmm" now stops the agent too, since it is voice. A short
+cough mostly doesn't (Silero is trained to tell speech from noise). If a turn
+ends with no words at all, the agent picks its reply up again
+(call_controls.ReplyResumer), so a cough costs a pause, not the reply.
 
-A cough produces no words, so it never interrupts. Interim transcripts are
-used, so the agent stops as soon as the first real word is recognised.
+Words are the backup for speech VAD misses: while the agent is speaking,
+backchannels ("mm-hmm", "yeah", "okay") are ignored, one real word ("wait",
+"no", "Tuesday") interrupts, and so do three words of anything. While the
+agent is silent, any word starts the caller's turn.
 """
 
 import re
 
-from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame
+from pipecat.frames.frames import InterimTranscriptionFrame, TranscriptionFrame, VADUserStartedSpeakingFrame
 from pipecat.turns.types import ProcessFrameResult
 from pipecat.turns.user_start.min_words_user_turn_start_strategy import (
     MinWordsUserTurnStartStrategy,
@@ -44,9 +47,15 @@ def is_interruption(text: str) -> bool:
     return any(w not in BACKCHANNELS for w in words)
 
 
-class BackchannelAwareStartStrategy(MinWordsUserTurnStartStrategy):
+class VoiceStartStrategy(MinWordsUserTurnStartStrategy):
     def __init__(self, **kwargs):
         super().__init__(min_words=1, use_interim=True, **kwargs)
+
+    async def process_frame(self, frame) -> ProcessFrameResult:
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self.trigger_user_turn_started()
+            return ProcessFrameResult.STOP
+        return await super().process_frame(frame)
 
     async def _handle_transcription(
         self, frame: TranscriptionFrame | InterimTranscriptionFrame

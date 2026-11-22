@@ -37,16 +37,10 @@ sys.path.insert(0, str(ROOT))
 FRAME_SECS = 0.02
 
 
-# ------------------------------------------------------------------ stats
+# ---------------------------------------------------------------- latency
 
-
-def pct(values: list[float], p: float) -> float | None:
-    """Nearest-rank percentile."""
-    if not values:
-        return None
-    ordered = sorted(values)
-    rank = max(1, round(p / 100 * len(ordered)))
-    return ordered[min(rank, len(ordered)) - 1]
+# The maths is shared with the dashboard (GET /dashboard/latency).
+from app.calls.latency_stats import is_real_call, latency_table, pct  # noqa: E402,F401
 
 
 def stat_row(name: str, values: list[float]) -> str:
@@ -56,10 +50,7 @@ def stat_row(name: str, values: list[float]) -> str:
             f"{pct(values, 95):.3f} |")
 
 
-# ---------------------------------------------------------------- latency
-
-
-def load_calls(since: str | None) -> list[dict]:
+def load_calls(since: str | None, include_fake: bool = False) -> list[dict]:
     from app.config import DATA_DIR
     calls = []
     cutoff = datetime.fromisoformat(since).timestamp() if since else None
@@ -67,36 +58,23 @@ def load_calls(since: str | None) -> list[dict]:
         call = json.loads(path.read_text())
         if cutoff and (call.get("created_at") or 0) < cutoff:
             continue
+        if not include_fake and not is_real_call(call):
+            continue
         calls.append(call)
     return calls
 
 
-def turn_kind(turn: dict) -> str:
-    names = [t["name"] for t in turn.get("tools", []) if t["name"] != "end_call"]
-    if any(k in n for n in names for k in ("faq", "knowledge", "kb", "lookup")):
-        return "knowledge"
-    return "tool" if names else "plain"
-
-
 def latency_report(calls: list[dict]) -> str:
-    turns = [dict(t, call=c["id"]) for c in calls for t in c.get("latency", [])
-             if t.get("total_secs") is not None]
-    out = [f"{len(turns)} measured turns across {len(calls)} calls "
-           "(server side: caller stopped -> agent's first audio frame).", ""]
-    for kind in ("all", "plain", "tool", "knowledge"):
-        group = turns if kind == "all" else [t for t in turns if turn_kind(t) == kind]
-        if not group:
+    table = latency_table(calls)
+    out = [f"{table['turns']} measured turns across {table['calls']} calls ({table['measured']}).", ""]
+    for kind, stages in table["groups"].items():
+        if not stages["total"]["n"]:
             continue
-        out += [f"**{kind} turns**", "", "| Stage | n | median (s) | p95 (s) |", "| --- | --- | --- | --- |",
-                stat_row("Total", [t["total_secs"] for t in group]),
-                stat_row("Turn detection (VAD + speech timeout)",
-                         [t["user_turn_secs"] for t in group if t.get("user_turn_secs") is not None])]
-        for stage, label in (("stt", "STT time to first byte"), ("llm", "LLM time to first token (all calls in the turn)"),
-                             ("tts", "TTS time to first audio")):
-            out.append(stat_row(label, [t["ttfb_secs"][stage] for t in group if stage in t.get("ttfb_secs", {})]))
-        tool_secs = [sum(x["secs"] for x in t.get("tools", []) if x["name"] != "end_call") for t in group]
-        if any(tool_secs):
-            out.append(stat_row("Tool HTTP time", tool_secs))
+        out += [f"**{kind} turns**", "", "| Stage | n | median (s) | p95 (s) |", "| --- | --- | --- | --- |"]
+        for stage in table["stages"]:
+            row = stages[stage["key"]]
+            if row["n"]:
+                out.append(f"| {stage['label']} | {row['n']} | {row['median']:.3f} | {row['p95']:.3f} |")
         out.append("")
     return "\n".join(out)
 
@@ -226,6 +204,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     lat = sub.add_parser("latency")
     lat.add_argument("--since", help="only calls created after this ISO date/time")
+    lat.add_argument("--include-fake", action="store_true", help="also count fake-client calls")
     aud = sub.add_parser("audio")
     aud.add_argument("wav", type=Path)
     aud.add_argument("--agent-channel", choices=["auto", "left", "right"], default="right")
@@ -234,7 +213,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.cmd == "latency":
-        print(latency_report(load_calls(args.since)))
+        print(latency_report(load_calls(args.since, args.include_fake)))
     elif args.cmd == "audio":
         print(audio_report(args.wav, args.agent_channel)[0])
     else:

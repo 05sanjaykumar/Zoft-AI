@@ -42,6 +42,16 @@ def _language(code: str) -> Language:
         return Language.EN_US
 
 
+def deepgram_language(code: str) -> Language:
+    """Deepgram Nova-3 takes en-IN directly (and hi, en-GB, en-US)."""
+    lang = _language(code)
+    if lang.value.startswith("hi"):
+        return Language.HI
+    if lang in (Language.EN_IN, Language.EN_GB):
+        return lang
+    return Language.EN_US
+
+
 def stt_language(code: str) -> Language:
     """NVIDIA's streaming ASR knows en-US / en-GB / hi-IN, not en-IN."""
     lang = _language(code)

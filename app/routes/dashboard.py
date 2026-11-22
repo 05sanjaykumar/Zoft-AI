@@ -2,6 +2,7 @@
 
     GET /dashboard        the page (plain HTML + JS, reads the API below)
     GET /dashboard/info   our number, active calls, the outbound example body
+    GET /dashboard/latency  median / p95 per stage across calls (real ones by default)
 """
 
 import json
@@ -11,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse
 
 from app.calls import store
+from app.calls.latency_stats import is_real_call, latency_table
 from app.config import PUBLIC_HOST, TWILIO_PHONE_NUMBER
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -33,3 +35,11 @@ def info():
         "active_calls": len(store.TASKS),
         "outbound_example": json.loads(OUTBOUND_EXAMPLE.read_text()),
     }
+
+
+@router.get("/latency")
+def latency(include_fake: bool = False):
+    calls = [r.to_public() for r in store.all_records()]
+    if not include_fake:
+        calls = [c for c in calls if is_real_call(c)]
+    return latency_table(calls)

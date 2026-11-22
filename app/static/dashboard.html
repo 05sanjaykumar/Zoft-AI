@@ -66,6 +66,12 @@
   pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
   audio { width: 100%; margin-top: 4px; }
   .empty { color: var(--muted); padding: 8px 0; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .tabs button { padding: 4px 10px; background: var(--chip); color: var(--text); font-size: 13px; }
+  .tabs button.on { background: var(--accent); color: #fff; }
+  .chip.done { color: var(--ok); }
+  label.check { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  label.check input { flex: none; min-width: 0; }
 </style>
 </head>
 <body>
@@ -100,6 +106,20 @@
         </table>
       </div>
       <div class="empty" id="callsEmpty" hidden>No calls yet.</div>
+    </section>
+
+    <section>
+      <h2>Latency across calls <span class="chip" id="latProgress">…</span></h2>
+      <div class="tabs" id="latTabs"></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Stage</th><th class="num">n</th><th class="num">Median (s)</th>
+            <th class="num">p95 (s)</th></tr></thead>
+          <tbody id="latency"></tbody>
+        </table>
+      </div>
+      <label class="muted check"><input type="checkbox" id="latFake"> include fake test calls</label>
+      <div class="muted" id="latNote"></div>
     </section>
 
     <section>
@@ -176,6 +196,34 @@ async function refreshBookings() {
     <tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.patient_name)}</td>
         <td>${esc(b.reason)}</td><td class="muted">${esc(b.created_at)}</td></tr>`).join("");
 }
+
+let latKind = "all";
+const KIND_LABEL = { all: "All turns", plain: "Plain", tool: "Tool (slots, booking)", knowledge: "Knowledge base" };
+
+async function refreshLatency() {
+  const fake = document.getElementById("latFake").checked;
+  const t = await getJSON(`/dashboard/latency?include_fake=${fake}`).catch(() => null);
+  if (!t) return;
+  const prog = document.getElementById("latProgress");
+  prog.textContent = `${t.turns} / ${t.target_turns} turns${fake ? "" : " on real calls"}`;
+  prog.classList.toggle("done", t.turns >= t.target_turns);
+  document.getElementById("latTabs").innerHTML = Object.keys(KIND_LABEL).map((k) =>
+    `<button type="button" data-kind="${k}" class="${k === latKind ? "on" : ""}">
+       ${KIND_LABEL[k]} (${t.groups[k].total.n})</button>`).join("");
+  const rows = t.stages.map((s) => ({ ...s, ...t.groups[latKind][s.key] })).filter((r) => r.n);
+  document.getElementById("latency").innerHTML = rows.length ? rows.map((r) => `
+    <tr${r.key === "total" ? ' style="font-weight:600"' : ""}><td>${esc(r.label)}</td>
+      <td class="num">${r.n}</td><td class="num">${secs(r.median)}</td><td class="num">${secs(r.p95)}</td></tr>`).join("")
+    : '<tr><td colspan="4" class="empty">No measured turns of this kind yet.</td></tr>';
+  document.getElementById("latNote").textContent =
+    `${t.calls} calls. Measured ${t.measured}. Telephony round trip: python tools/measure.py twilio <id>.`;
+}
+
+document.getElementById("latTabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-kind]");
+  if (b) { latKind = b.dataset.kind; refreshLatency(); }
+});
+document.getElementById("latFake").addEventListener("change", refreshLatency);
 
 function select(id) {
   selected = id; lastDetail = "";
@@ -280,7 +328,7 @@ document.getElementById("callForm").addEventListener("submit", async (e) => {
 });
 
 async function tick() {
-  await Promise.all([refreshInfo(), refreshCalls(), refreshBookings(), refreshDetail()]);
+  await Promise.all([refreshInfo(), refreshCalls(), refreshBookings(), refreshDetail(), refreshLatency()]);
 }
 tick();
 setInterval(tick, 3000);

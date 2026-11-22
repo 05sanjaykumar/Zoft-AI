@@ -38,8 +38,12 @@ Open **http://localhost:8000/dashboard** while the server runs. One page, refres
   runs (arguments and results), per-reply latency split into STT / LLM / TTS, cost per component,
   the recording, and an **End call** button while it's live.
 - **Bookings**: what the mock clinic has booked, so a booking made on a call shows up here.
+- **Latency across calls**: median and p95 per stage (turn detection, STT, model, TTS, tools)
+  over all real calls, split into plain, tool and knowledge-base turns, with a count toward the
+  30 turns REPORT.md needs. Fake test calls are left out unless you tick the box. Same maths as
+  `tools/measure.py latency` ([app/calls/latency_stats.py](app/calls/latency_stats.py)).
 
-It reads the same API as everything else (`/calls`, `/mock/bookings`); there's nothing it can do
+It reads the same API as everything else (`/calls`, `/mock/bookings`, `/dashboard/latency`); there's nothing it can do
 that `curl` can't.
 
 ### Try it without a phone
@@ -102,7 +106,7 @@ See [examples/](examples/) and [app/schemas.py](app/schemas.py).
 | Part | Choice | Why |
 | --- | --- | --- |
 | Telephony | Twilio Media Streams | Trial account available, two-way audio over a WebSocket, Pipecat ships the serializer |
-| Speech-to-text | NVIDIA `nemotron-asr-streaming` | Streams partial transcripts while the caller talks |
+| Speech-to-text | NVIDIA `nemotron-asr-streaming` (`STT_PROVIDER=nvidia`, default; `deepgram` for Deepgram Nova-2 en-IN) | Streams partial transcripts while the caller talks. Deepgram was tried on real calls: replayed clips favoured it (words wrong Nova-2 20%, NVIDIA 28%, Nova-3 36%, 10 utterances), but on live calls NVIDIA was clearly more accurate for this caller, so it stayed. Short names fail on all of them over 8 kHz audio, so names are spelled back |
 | LLM | Groq `openai/gpt-oss-120b`, reasoning effort low | Fast first token and reliable tool calling (measured in MediConnect) |
 | Text-to-speech | Kokoro, local ONNX | No per-character cost; chunked at clauses so long sentences start speaking sooner |
 | Turn-taking | Silero VAD (0.2s) + 0.8s speech timeout | Smart Turn cut callers off mid-sentence in MediConnect; a fixed pause is predictable |
@@ -120,6 +124,7 @@ app/
   calls/store.py       call records (memory + data/calls/*.json), inbound config
   calls/recorder.py    recording, per-turn transcript, per-turn latency, usage
   calls/costs.py       cost per component from usage x pricing.json
+  calls/latency_stats.py  median / p95 per stage across calls (dashboard + tools/measure.py)
   calls/finalize.py    at call end: cost, save, POST summary to webhookUrl
   routes/calls.py      /calls API
   routes/twilio.py     Twilio webhook, status callback, media stream
@@ -129,12 +134,14 @@ app/
   voice/services.py    STT, LLM, TTS (with the clause chunker)
   voice/http_tools.py  config tools → HTTP calls, errors and timeouts returned to the model
   voice/voices.py      voice and language mapping
-  voice/turns.py       interruption rule: words, not voice activity; backchannels ignored
-  voice/call_controls.py  filler, end_call, inactivity, max duration
+  voice/turns.py       interruption rule: voice starts a turn, words as backup
+  voice/call_controls.py  filler, end_call, inactivity, max duration, one question per reply
+  voice/knowledge.py   lookup_knowledge tool: keyword search over knowledge/<name>.md
+  voice/spelling.py    spelled letters recovered from recogniser text ("yes" = S)
   clinic/              mock clinic: SQLite bookings table, UNIQUE (date, time)
 pricing.json           list prices with their source pages
 examples/              create-call bodies
-knowledge/clinic-faq.md  knowledge base document (lookup not wired yet)
+knowledge/clinic-faq.md  knowledge base document, one passage per ## section
 tools/fake_twilio_call.py
 tests/
 ```
@@ -158,10 +165,15 @@ double-booking guard, `POST /calls` (inbound config + outbound dial), `GET /call
 
 | Control | How | Fake-call result |
 | --- | --- | --- |
-| Interruptions | Words from interim transcripts start a turn, not voice activity; backchannels are ignored while the agent talks ([app/voice/turns.py](app/voice/turns.py)) | "Mm hmm" over the greeting: no interruption. "Wait, sorry…": agent quiet 0.17s after speech was detected |
-| Filler during tools | `on_function_calls_started` speaks "Let me check that." unless the model already said something; kept out of the history | One filler, then the answer |
+| Interruptions | Voice starts a turn: Silero VAD tuned for 8 kHz phone audio (confidence 0.5, min volume 0.2); words from the recogniser are the backup; a turn with no words resumes the cut-off reply ([app/voice/turns.py](app/voice/turns.py)) | Changed after real calls: the words-only rule took 1.2-1.7s at Twilio's edge (the recogniser needs 1.0-1.3s for a first word) and missed one short "hello". VAD caught all 9 utterances on that call ~0.25s in. Trade-off: "mm-hmm" now interrupts too |
+| Filler during tools | `on_function_calls_started` starts a 0.5s timer; if the tool is still running then, "Let me check that." plays (not if the model already spoke); kept out of the history | Changed after real calls: an always-on filler delayed the answer ~2s behind its own audio (the tool takes ~20 ms), and callers said "hello?" into the gap |
 | Agent hang-up | `end_call` tool; its argument is the closing line, then an end frame flushes behind it | Closing line played in full, then the call ended |
 | Inactivity | Pipecat idle event: check-in at `afterSeconds`, goodbye and hang-up when the silence reaches `hangUpAfterSeconds` (counted from the end of the check-in) | Check-in at 3s, hang-up 4s after it (config 3s / 7s) |
+| Knowledge base | `"knowledgeBase": "clinic-faq"` adds a `lookup_knowledge` tool; the model looks facts up during the call (the document is not in the prompt) and answers only from what it returns ([app/voice/knowledge.py](app/voice/knowledge.py)) | "What do you do here?" → the clinic overview; "How much does a cleaning cost?" → "A cleaning costs ₹1,200. Would you like to book an appointment?" (since then told to say amounts in words) Lookup under 1 ms |
+| One question per reply | A reply stops at its first question; tools (including `end_call`) don't run in the same reply as a question, and placeholder arguments like `"[Caller]"` are sent back to the model instead of the endpoint | Added after the first real call, where the model offered slots, ran on with more questions and hung up before the caller answered |
+| Spoken goodbye | If the model says goodbye as plain speech instead of calling `end_call`, the call ends once that line has played (not if the caller cut in) | Added after a real call where it said "You're welcome! Goodbye." and stayed on the line |
+| Clean TTS audio | One Kokoro model loaded and warmed up at server start, shared by all calls; its samples are capped before Pipecat converts them, and a reply's first chunk is cut at ~20 characters ([app/voice/services.py](app/voice/services.py)) | Real call before: 35 clicks in 2 minutes (samples up to 1.18 wrapped around). Fake call after: 0, peak 88% of full scale. First chunk 70 chars / 2.45s → 30 chars / 1.5s |
+| Spelled names | The agent asks callers to spell their name. Letters the recogniser writes as words ("yes" = S, "and" = N, "why" = Y) are recovered per turn and added to the transcript as "(spelled: S A N J)"; a booking name must be something the caller said or spelled ([app/voice/spelling.py](app/voice/spelling.py)) | Real call: "S, A, N, J" came through as "Yes, A and J" |
 | Max duration | Timer from stream start, ends with a closing line | Ended at 8s (config 8s) after the line played |
 
 Twilio hangs up only after the last line finishes ("Bot stopped speaking" comes before the end frame in the logs).
@@ -179,7 +191,6 @@ server ₹0.05, TTS ₹0. Prices and their sources are in [pricing.json](pricing
 
 - [ ] Real phone calls: 30+ measured turns, 10 interruptions → fill the PENDING sections of [REPORT.md](REPORT.md)
 - [ ] Demo video
-- Knowledge base: optional in the brief and not built; `knowledge/clinic-faq.md` is the document it would use.
 
 ## Measuring (for REPORT.md)
 

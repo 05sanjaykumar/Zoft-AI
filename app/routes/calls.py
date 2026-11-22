@@ -21,6 +21,25 @@ from app.schemas import CallConfig
 router = APIRouter(prefix="/calls", tags=["calls"])
 
 
+# Twilio's longest allowed call. Trial accounts are capped at 10 minutes and
+# reject a larger TimeLimit outright ("Invalid TimeLimit value").
+TRIAL_MAX_CALL_SECONDS = 600
+MAX_CALL_SECONDS = 14400
+_ACCOUNT_TYPE: dict[str, str] = {}
+
+
+def time_limit(client: Client, max_duration_seconds: int) -> int:
+    """Our max duration plus a 30s backstop, within what the account allows."""
+    if "type" not in _ACCOUNT_TYPE:
+        try:
+            _ACCOUNT_TYPE["type"] = client.api.accounts(TWILIO_ACCOUNT_SID).fetch().type
+        except Exception as exc:   # can't tell: assume the stricter trial cap
+            logger.warning(f"Could not read the Twilio account type: {exc}")
+            return min(max_duration_seconds + 30, TRIAL_MAX_CALL_SECONDS)
+    cap = TRIAL_MAX_CALL_SECONDS if _ACCOUNT_TYPE["type"] == "Trial" else MAX_CALL_SECONDS
+    return min(max_duration_seconds + 30, cap)
+
+
 def _require_twilio() -> Client:
     missing = [name for name, value in (
         ("TWILIO_ACCOUNT_SID", TWILIO_ACCOUNT_SID),
@@ -53,7 +72,7 @@ def create_call(config: CallConfig):
             url=f"https://{PUBLIC_HOST}/twilio/voice?call_id={record.id}",
             status_callback=f"https://{PUBLIC_HOST}/twilio/status",
             status_callback_event=["initiated", "ringing", "answered", "completed"],
-            time_limit=config.maxDurationSeconds + 30,  # backstop if our own timer fails
+            time_limit=time_limit(client, config.maxDurationSeconds),  # backstop if our timer fails
         )
     except Exception as exc:  # twilio raises its own error types
         record.status = "failed"

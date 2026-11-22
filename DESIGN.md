@@ -55,9 +55,9 @@ silence. Every failure would be counted per provider so the switch can be made b
 (mu-law, buffer clear on interruption, hang-up), Silero VAD, turn strategies, idle detection,
 `UserBotLatencyObserver`, usage metrics and the recording buffer.
 
-**Built here:** the interruption policy (words from interim transcripts start a turn; backchannels are
-ignored while the agent talks), the filler that's skipped when the model already spoke, `end_call`
-with the closing line as its argument, two-stage inactivity, tools defined as HTTP endpoints in
+**Built here:** the interruption policy (voice starts a turn, with VAD tuned for 8 kHz phone audio;
+words are the backup; a turn with no words resumes the cut-off reply), the filler that plays only for a slow tool (and not when the model already spoke), `end_call`
+with the closing line as its argument, a reply that stops at its first question, the knowledge lookup tool, two-stage inactivity, tools defined as HTTP endpoints in
 JSON, the call lifecycle and store, cost accounting.
 
 **What I'd build myself next:** turn-taking and interruption logic are the product's feel, so I'd own

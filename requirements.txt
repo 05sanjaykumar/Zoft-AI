@@ -7,7 +7,7 @@ python-dotenv
 httpx
 
 # Voice pipeline (Pipecat 1.8.x: VAD, STT, LLM, TTS, Twilio serializer)
-pipecat-ai[kokoro,nvidia,silero,websocket,groq]==1.8.1
+pipecat-ai[deepgram,kokoro,nvidia,silero,websocket,groq]==1.8.1
 
 # Kokoro breaks with numpy 1.x at runtime
 numpy>=2.0.2,<3.0.0

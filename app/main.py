@@ -13,6 +13,8 @@ from app.config import LLM_MODEL, PUBLIC_HOST, TWILIO_PHONE_NUMBER
 from app.routes.calls import router as calls_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.twilio import router as twilio_router
+from app.voice.services import warm_up_tts
+from app.voice.voices import kokoro_voice, tts_language
 
 
 @asynccontextmanager
@@ -24,6 +26,8 @@ async def lifespan(app: FastAPI):
     else:
         print("   phone:   not configured (set TWILIO_* and PUBLIC_HOST in .env)")
     print("   dashboard: http://localhost:8000/dashboard")
+    # Load and warm the shared Kokoro model now, not on the first caller's greeting.
+    await warm_up_tts(kokoro_voice("female-en-in-1"), tts_language("en-IN"))
     yield
 
 

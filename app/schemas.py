@@ -4,6 +4,7 @@ Field names match the assignment's example exactly (camelCase), so a body
 copied from the brief validates as-is.
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -55,8 +56,16 @@ class CallConfig(BaseModel):
         names = [t.name for t in self.tools]
         if len(names) != len(set(names)):
             raise ValueError("tool names must be unique")
-        if "end_call" in names:
-            raise ValueError("'end_call' is built in; use another tool name")
+        for builtin in ("end_call", "lookup_knowledge"):
+            if builtin in names:
+                raise ValueError(f"'{builtin}' is built in; use another tool name")
+        if self.knowledgeBase is not None:
+            from app.config import ROOT   # local import: config must not depend on schemas
+
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", self.knowledgeBase) or \
+                    not (ROOT / "knowledge" / f"{self.knowledgeBase}.md").exists():
+                raise ValueError(f"knowledgeBase '{self.knowledgeBase}' not found: "
+                                 "expected knowledge/<name>.md")
         if self.inactivity.hangUpAfterSeconds <= self.inactivity.afterSeconds:
             raise ValueError("inactivity.hangUpAfterSeconds must be greater than afterSeconds")
         return self

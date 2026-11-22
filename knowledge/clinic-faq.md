@@ -1,7 +1,13 @@
 # Bright Smile Dental: clinic FAQ
 
-This is the mock clinic's knowledge base (`"knowledgeBase": "clinic-faq"`). The agent should
-look it up during a call, not hold it in the prompt.
+This is the mock clinic's knowledge base (`"knowledgeBase": "clinic-faq"`). The agent looks it
+up during a call with its `lookup_knowledge` tool ([app/voice/knowledge.py](../app/voice/knowledge.py));
+it is not in the prompt. Each `##` section is one passage.
+
+## About the clinic
+Bright Smile Dental is a family dental clinic in T. Nagar, Chennai. We do check-ups, cleaning,
+fillings, root canal treatment, extractions and teeth whitening, for adults and children.
+On the phone we can book an appointment or answer questions about the clinic.
 
 ## Opening hours
 Monday to Saturday, 9:00 AM to 5:00 PM. Closed for lunch from 1:00 PM to 2:00 PM.

@@ -76,3 +76,20 @@ def test_status_callback_marks_call_completed():
 
 def test_unknown_call_is_404():
     assert client.get("/calls/nope").status_code == 404
+
+
+def test_time_limit_fits_a_trial_account():
+    from types import SimpleNamespace
+
+    from app.routes import calls as calls_route
+
+    def fake_client(account_type):
+        fetch = lambda: SimpleNamespace(type=account_type)
+        return SimpleNamespace(api=SimpleNamespace(accounts=lambda sid: SimpleNamespace(fetch=fetch)))
+
+    calls_route._ACCOUNT_TYPE.clear()
+    assert calls_route.time_limit(fake_client("Trial"), 600) == 600     # trial caps at 10 min
+    assert calls_route.time_limit(fake_client("Trial"), 120) == 150     # under the cap: +30s backstop
+    calls_route._ACCOUNT_TYPE.clear()
+    assert calls_route.time_limit(fake_client("Full"), 600) == 630
+    calls_route._ACCOUNT_TYPE.clear()
