@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoft voice agent</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667085; --line: #e4e7ec;
+    --accent: #2f6fed; --ok: #16803c; --warn: #b54708; --bad: #c4320a; --chip: #eef2f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1e24; --text: #e6e8eb; --muted: #98a2b3; --line: #2b313a;
+      --accent: #6b9bff; --ok: #4ac37a; --warn: #f5a524; --bad: #ff6b57; --chip: #252b33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline;
+           padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: var(--muted); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px;
+         padding: 16px 20px; max-width: 1500px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+            padding: 14px 16px; min-width: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); text-transform: uppercase;
+       letter-spacing: .04em; }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.call { cursor: pointer; }
+  tr.call:hover td { background: var(--chip); }
+  tr.call.sel td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--chip);
+          font-size: 12px; }
+  .s-in-progress, .s-ringing, .s-queued { color: var(--accent); }
+  .s-completed { color: var(--ok); }
+  .s-failed, .s-busy, .s-no-answer, .s-canceled { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input { flex: 1; min-width: 180px; padding: 8px 10px; border: 1px solid var(--line);
+          border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  button { padding: 8px 14px; border: 0; border-radius: 6px; background: var(--accent);
+           color: #fff; font: inherit; cursor: pointer; }
+  button.danger { background: var(--bad); }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { margin-top: 8px; min-height: 1.2em; }
+  .msg.err { color: var(--bad); } .msg.ok { color: var(--ok); }
+  .turn { display: grid; grid-template-columns: 54px 60px 1fr; gap: 8px; padding: 4px 0; }
+  .turn .who { font-weight: 600; }
+  .turn.agent .who { color: var(--accent); }
+  .turn .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cut { color: var(--warn); font-size: 12px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+  audio { width: 100%; margin-top: 4px; }
+  .empty { color: var(--muted); padding: 8px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Zoft voice agent</h1>
+  <span class="meta" id="number">number: …</span>
+  <span class="meta" id="host">tunnel: …</span>
+  <span class="meta" id="live">live calls: …</span>
+  <span class="meta">auto-refresh 3s · <a href="/docs">API docs</a></span>
+</header>
+
+<main>
+  <div class="col">
+    <section>
+      <h2>Call me</h2>
+      <form id="callForm">
+        <input id="to" placeholder="+91XXXXXXXXXX (a verified number on the Twilio trial)"
+               autocomplete="tel" required>
+        <button id="callBtn">Call</button>
+      </form>
+      <div class="msg" id="callMsg"></div>
+      <div class="muted">Uses examples/outbound-clinic.json with this number as <code>to</code>.</div>
+    </section>
+
+    <section>
+      <h2>Calls</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Started</th><th>Dir</th><th>Number</th><th>Status</th>
+            <th class="num">Secs</th><th class="num">Turns</th><th class="num">₹</th></tr></thead>
+          <tbody id="calls"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="callsEmpty" hidden>No calls yet.</div>
+    </section>
+
+    <section>
+      <h2>Bookings (mock clinic)</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Date</th><th>Time</th><th>Name</th><th>Reason</th><th>Booked at (UTC)</th></tr></thead>
+          <tbody id="bookings"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="bookingsEmpty" hidden>No bookings yet.</div>
+    </section>
+  </div>
+
+  <section id="detail">
+    <h2>Call detail</h2>
+    <div class="empty">Pick a call on the left.</div>
+  </section>
+</main>
+
+<script>
+const LIVE = new Set(["queued", "ringing", "in-progress"]);
+let example = null, selected = null, lastDetail = "";
+
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtTime = (epoch) => epoch ? new Date(epoch * 1000).toLocaleString([], {
+  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+const secs = (v, d = 2) => v == null ? "–" : Number(v).toFixed(d);
+const median = (xs) => {
+  const s = xs.filter((x) => x != null).sort((a, b) => a - b);
+  return s.length ? s[Math.floor((s.length - 1) / 2)] : null;
+};
+
+async function getJSON(url, opts) {
+  const r = await fetch(url, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body));
+  return body;
+}
+
+async function refreshInfo() {
+  try {
+    const i = await getJSON("/dashboard/info");
+    example = i.outbound_example;
+    document.getElementById("number").textContent = "number: " + (i.phone_number || "not set");
+    document.getElementById("host").textContent = "tunnel: " + (i.public_host || "PUBLIC_HOST not set");
+    document.getElementById("live").textContent = "live calls: " + i.active_calls;
+  } catch (e) { document.getElementById("live").textContent = "server unreachable"; }
+}
+
+async function refreshCalls() {
+  const calls = await getJSON("/calls").catch(() => null);
+  if (!calls) return;
+  document.getElementById("callsEmpty").hidden = calls.length > 0;
+  document.getElementById("calls").innerHTML = calls.map((c) => `
+    <tr class="call ${c.id === selected ? "sel" : ""}" data-id="${esc(c.id)}">
+      <td>${esc(fmtTime(c.created_at))}</td>
+      <td>${c.direction === "outbound" ? "out" : "in"}</td>
+      <td>${esc(c.direction === "outbound" ? c.to : c.from)}</td>
+      <td class="s-${esc(c.status)}">${esc(c.status)}</td>
+      <td class="num">${secs(c.duration_seconds, 0)}</td>
+      <td class="num">${c.turns}</td>
+      <td class="num">${c.cost_inr == null ? "–" : Number(c.cost_inr).toFixed(2)}</td>
+    </tr>`).join("");
+  if (!selected && calls.length) select(calls[0].id);
+}
+
+async function refreshBookings() {
+  const rows = await getJSON("/mock/bookings").catch(() => null);
+  if (!rows) return;
+  document.getElementById("bookingsEmpty").hidden = rows.length > 0;
+  document.getElementById("bookings").innerHTML = rows.map((b) => `
+    <tr><td>${esc(b.date)}</td><td>${esc(b.time)}</td><td>${esc(b.patient_name)}</td>
+        <td>${esc(b.reason)}</td><td class="muted">${esc(b.created_at)}</td></tr>`).join("");
+}
+
+function select(id) {
+  selected = id; lastDetail = "";
+  document.querySelectorAll("tr.call").forEach((tr) => tr.classList.toggle("sel", tr.dataset.id === id));
+  refreshDetail();
+}
+
+async function refreshDetail() {
+  if (!selected) return;
+  const c = await getJSON(`/calls/${selected}`).catch(() => null);
+  if (!c) return;
+  const key = JSON.stringify(c, (k, v) => k === "duration_seconds" && LIVE.has(c.status) ? undefined : v);
+  if (key === lastDetail) return;          // unchanged: don't reset the audio player
+  lastDetail = key;
+  document.getElementById("detail").innerHTML = renderDetail(c);
+  const end = document.getElementById("endBtn");
+  if (end) end.onclick = async () => {
+    end.disabled = true;
+    await getJSON(`/calls/${c.id}/end`, { method: "POST" }).catch((e) => alert(e.message));
+  };
+}
+
+function renderDetail(c) {
+  const live = LIVE.has(c.status);
+  const totals = c.latency.map((l) => l.total_secs);
+  const stat = (label, value) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`;
+
+  const transcript = c.transcript.length ? c.transcript.map((t) => `
+    <div class="turn ${t.role === "agent" ? "agent" : ""}">
+      <span class="t">${secs(t.t_start, 1)}s</span>
+      <span class="who">${t.role === "agent" ? "Agent" : "Caller"}</span>
+      <span>${esc(t.text)} ${t.interrupted ? '<span class="cut">(interrupted)</span>' : ""}</span>
+    </div>`).join("") : '<div class="empty">Nothing said yet.</div>';
+
+  const tools = c.tools.length ? `<div class="scroll"><table>
+    <thead><tr><th>Tool</th><th>Arguments</th><th>Result</th><th class="num">ms</th></tr></thead>
+    <tbody>${c.tools.map((t) => `<tr>
+      <td>${esc(t.name)} ${t.ok ? "" : '<span class="cut">error</span>'}</td>
+      <td><pre>${esc(JSON.stringify(t.arguments))}</pre></td>
+      <td><pre>${esc(JSON.stringify(t.result))}</pre></td>
+      <td class="num">${t.ms ?? ""}</td></tr>`).join("")}</tbody></table></div>`
+    : '<div class="empty">No tool runs.</div>';
+
+  const latency = c.latency.length ? `<div class="scroll"><table>
+    <thead><tr><th>#</th><th class="num">Total</th><th class="num">Turn wait</th>
+      <th class="num">STT</th><th class="num">LLM</th><th class="num">TTS</th><th>Tools</th></tr></thead>
+    <tbody>${c.latency.map((l, i) => `<tr><td>${i + 1}</td>
+      <td class="num">${secs(l.total_secs)}</td><td class="num">${secs(l.user_turn_secs)}</td>
+      <td class="num">${secs(l.ttfb_secs?.stt)}</td><td class="num">${secs(l.ttfb_secs?.llm)}</td>
+      <td class="num">${secs(l.ttfb_secs?.tts)}</td>
+      <td>${esc((l.tools || []).map((t) => t.name || t).join(", "))}</td></tr>`).join("")}
+    </tbody></table></div>` : '<div class="empty">No replies measured yet.</div>';
+
+  const cost = c.cost ? `<table><tbody>${Object.entries(c.cost.components).map(([k, v]) => `
+      <tr><td>${esc(k)}</td><td class="num">₹${Number(v.inr).toFixed(2)}</td>
+          <td class="muted">${esc(v.basis)}</td></tr>`).join("")}
+      <tr><td><b>Total</b></td><td class="num"><b>₹${Number(c.cost.total_inr).toFixed(2)}</b></td>
+          <td class="muted">₹${secs(c.cost.per_minute_inr)}/min</td></tr></tbody></table>`
+    : '<div class="empty">Worked out when the call ends.</div>';
+
+  return `
+    <h2>Call ${esc(c.id)} <span class="chip s-${esc(c.status)}">${esc(c.status)}</span>
+      ${live ? '<button class="danger" id="endBtn" style="float:right">End call</button>' : ""}</h2>
+    <div class="muted">${esc(c.direction)} · ${esc(c.from_number)} → ${esc(c.to_number)} ·
+      ${esc(fmtTime(c.created_at))}${c.end_reason ? " · ended: " + esc(c.end_reason) : ""}</div>
+    <h3>Summary</h3>
+    <div class="stats">
+      ${stat("seconds", secs(c.duration_seconds, 0))}
+      ${stat("turns", c.transcript.length)}
+      ${stat("tool runs", c.tools.length)}
+      ${stat("median reply (s)", secs(median(totals)))}
+      ${stat("cost", c.cost ? "₹" + Number(c.cost.total_inr).toFixed(2) : "–")}
+    </div>
+    ${c.recording_path && !live ? `<h3>Recording (caller left, agent right)</h3>
+      <audio controls preload="none" src="/calls/${esc(c.id)}/recording"></audio>` : ""}
+    <h3>Transcript</h3>${transcript}
+    <h3>Tool runs</h3>${tools}
+    <h3>Latency per reply (caller stopped → agent's first audio, seconds)</h3>${latency}
+    <h3>Cost</h3>${cost}
+    ${c.webhook ? `<h3>Webhook</h3><pre>${esc(JSON.stringify(c.webhook))}</pre>` : ""}`;
+}
+
+document.getElementById("calls").addEventListener("click", (e) => {
+  const tr = e.target.closest("tr.call");
+  if (tr) select(tr.dataset.id);
+});
+
+document.getElementById("callForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("callMsg"), btn = document.getElementById("callBtn");
+  const to = document.getElementById("to").value.replace(/\s+/g, "");
+  if (!example) { msg.className = "msg err"; msg.textContent = "Server not reachable."; return; }
+  btn.disabled = true; msg.className = "msg"; msg.textContent = "Dialling…";
+  try {
+    const r = await getJSON("/calls", { method: "POST", headers: { "content-type": "application/json" },
+                                        body: JSON.stringify({ ...example, to }) });
+    msg.className = "msg ok"; msg.textContent = `Calling ${r.to} (call ${r.id}).`;
+    await refreshCalls(); select(r.id);
+  } catch (err) {
+    msg.className = "msg err"; msg.textContent = err.message;
+  } finally { btn.disabled = false; }
+});
+
+async function tick() {
+  await Promise.all([refreshInfo(), refreshCalls(), refreshBookings(), refreshDetail()]);
+}
+tick();
+setInterval(tick, 3000);
+</script>
+</body>
+</html>

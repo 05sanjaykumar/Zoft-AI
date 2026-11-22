@@ -71,7 +71,10 @@ def create_call(config: CallConfig):
 def list_calls():
     return [
         {"id": r.id, "direction": r.direction, "status": r.status,
-         "to": r.to_number, "from": r.from_number, "duration_seconds": r.duration_seconds}
+         "to": r.to_number, "from": r.from_number, "duration_seconds": r.duration_seconds,
+         "created_at": r.created_at, "end_reason": r.end_reason,
+         "turns": len(r.transcript), "tools": len(r.tools),
+         "cost_inr": (r.cost or {}).get("total_inr")}
         for r in store.all_records()
     ]
 

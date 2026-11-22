@@ -11,6 +11,7 @@ from app.calls import store
 from app.clinic.routes import router as clinic_router
 from app.config import LLM_MODEL, PUBLIC_HOST, TWILIO_PHONE_NUMBER
 from app.routes.calls import router as calls_router
+from app.routes.dashboard import router as dashboard_router
 from app.routes.twilio import router as twilio_router
 
 
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
         print(f"   phone:   {TWILIO_PHONE_NUMBER} -> https://{PUBLIC_HOST}/twilio/voice")
     else:
         print("   phone:   not configured (set TWILIO_* and PUBLIC_HOST in .env)")
+    print("   dashboard: http://localhost:8000/dashboard")
     yield
 
 
@@ -35,6 +37,7 @@ app = FastAPI(
 app.include_router(calls_router)
 app.include_router(twilio_router)
 app.include_router(clinic_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")

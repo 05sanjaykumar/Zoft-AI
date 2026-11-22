@@ -98,6 +98,13 @@ def find_by_twilio_sid(sid: str) -> CallRecord | None:
 
 
 def all_records() -> list[CallRecord]:
+    """Calls in memory plus the ones saved before a restart."""
+    for path in CALLS_DIR.glob("*.json"):
+        if path.stem not in _LIVE:
+            try:
+                get(path.stem)
+            except Exception:   # a half-written or old-format file shouldn't break the list
+                continue
     return sorted(_LIVE.values(), key=lambda r: r.created_at, reverse=True)
 
 

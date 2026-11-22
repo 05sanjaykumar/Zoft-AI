@@ -29,6 +29,19 @@ uvicorn app.main:app --port 8000
 
 The first call downloads the Kokoro model and voices (about 350 MB) into `~/.cache/pipecat`.
 
+### Dashboard
+
+Open **http://localhost:8000/dashboard** while the server runs. One page, refreshed every 3 seconds:
+
+- **Call me**: type a number and the agent calls it (uses `examples/outbound-clinic.json`).
+- **Calls**: every call with status, duration, turns and cost; click one for its transcript, tool
+  runs (arguments and results), per-reply latency split into STT / LLM / TTS, cost per component,
+  the recording, and an **End call** button while it's live.
+- **Bookings**: what the mock clinic has booked, so a booking made on a call shows up here.
+
+It reads the same API as everything else (`/calls`, `/mock/bookings`); there's nothing it can do
+that `curl` can't.
+
 ### Try it without a phone
 
 `tools/fake_twilio_call.py` behaves like Twilio on an inbound call: it asks the webhook for TwiML,
@@ -59,6 +72,7 @@ calls only reach verified numbers. A free ngrok URL changes on restart, so steps
 | `GET` | `/calls/{id}` | Status, duration, transcript, recording link, tool runs, cost |
 | `POST` | `/calls/{id}/end` | Hang up a live call (or cancel one still ringing) |
 | `GET` | `/calls/{id}/recording` | Stereo WAV: caller left, agent right |
+| `GET` | `/dashboard` | The page above |
 | `POST` | `/twilio/voice` | Twilio webhook: returns TwiML that opens the media stream |
 | `POST` | `/twilio/status` | Twilio status callback (ringing, completed, no-answer…) |
 | `WS` | `/twilio/stream` | Twilio media stream |
@@ -109,6 +123,8 @@ app/
   calls/finalize.py    at call end: cost, save, POST summary to webhookUrl
   routes/calls.py      /calls API
   routes/twilio.py     Twilio webhook, status callback, media stream
+  routes/dashboard.py  /dashboard page and its /dashboard/info
+  static/dashboard.html  the page: plain HTML + JS, no build step
   voice/pipeline.py    builds one call's Pipecat pipeline from its config
   voice/services.py    STT, LLM, TTS (with the clause chunker)
   voice/http_tools.py  config tools → HTTP calls, errors and timeouts returned to the model
