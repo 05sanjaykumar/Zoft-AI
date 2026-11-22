@@ -1,8 +1,10 @@
 # REPORT
 
-Every number says how it was measured. Sections marked **PENDING REAL CALLS** are filled from
-real phone calls with the commands shown; the method is fixed now so the numbers can't be chosen
-after the fact.
+Every number says how it was measured. All numbers below come from **10 real phone calls** on
+2026-11-22 (Twilio trial, outbound to a verified Indian mobile), regenerated with the commands shown.
+The setup changed during the day as real calls exposed problems; where that matters, numbers are
+split by setup. Fake-client calls are excluded everywhere (`is_real_call` in
+`app/calls/latency_stats.py`).
 
 Setup for all measurements: the server on one MacBook (Apple Silicon, CPU only) behind ngrok,
 Twilio trial account with a US number, Groq `openai/gpt-oss-120b` (reasoning effort low), NVIDIA
@@ -33,48 +35,68 @@ switches. Real-call numbers below are from NVIDIA calls.
 - On a tool turn the first sound is the filler line ("Let me check that."), which is what the brief
   defines as the first sound. The time until the actual answer is reported separately.
 
-### All turns: PENDING REAL CALLS (target ≥ 30 turns)
+### All turns (38 replies across 10 real calls)
+
+`python tools/measure.py latency`. Server side: caller stopped speaking → agent's first audio frame.
 
 | Stage | n | median (s) | p95 (s) |
 | --- | --- | --- | --- |
-| Total (server side) | | | |
-| Turn detection (VAD 0.2s + 0.8s timeout) | | | |
-| STT time to first byte | | | |
-| LLM time to first token | | | |
-| TTS time to first audio | | | |
-| Telephony round trip (Twilio ↔ server) | | | |
+| **Total (server side)** | 38 | **2.71** | **4.44** |
+| Turn detection (VAD 0.2s + 0.8s timeout) | 37 | 1.00 | 1.49 |
+| Speech-to-text, time to first byte | 35 | 0.54 | 0.85 |
+| Model, time to first token (all model calls in the turn) | 37 | 0.45 | 1.01 |
+| Text-to-speech, time to first audio | 38 | 0.90 | 1.60 |
+| Telephony round trip (Twilio ↔ server), per call | 8 calls | 0.59 | 0.65 (max) |
 
-### Tool turn: PENDING REAL CALLS
+What the caller hears is server total + the Twilio ↔ server round trip + the phone network leg
+(not measurable here). At Twilio's edge, the per-call median gap from caller-stopped to agent-audio
+was 2.7-3.6s.
 
-Same columns, for turns that call `check_slots` / `book_slot`, plus tool HTTP time and the time to
-the answer after the filler.
+Turn detection and STT overlap: STT finalises during the 0.8s wait. The stages are not additive.
 
-### Knowledge-base turn: PENDING REAL CALLS
+**By setup** (total, median / p95):
 
-Turns that call `lookup_knowledge` ("what are your hours?", "how much is a cleaning?"). The lookup
-is a keyword search over the FAQ's sections in the server process, so its own time is under 1 ms
-(logged per run in `tools[].ms`). What it adds is the second model call that reads the result, so
-the report gives LLM time on knowledge turns next to plain turns. No filler line is played for it.
+| Setup | Replies | Total | TTS first audio |
+| --- | --- | --- | --- |
+| NVIDIA, word-based interruptions, Kokoro loaded per call (first 4 calls) | 17 | 2.81 / 7.11 | 1.05 / 1.56 |
+| Deepgram Nova-3 / Nova-2 (3 calls, rolled back) | 10 | 2.64 / 4.44 | 1.10 / 1.60 |
+| **NVIDIA, final setup** (shared warm Kokoro, short first chunk, voice interruptions) | 8 | **2.48 / 3.78** | **0.57 / 0.74** |
 
-Preliminary (two fake calls, one reply each): total 3.75s and 5.51s; LLM (both model calls)
-0.82s and 1.83s; TTS first audio 1.76s and 2.45s; lookup 0.28 ms and 0.66 ms.
+The final setup has only one call of 8 replies, so its numbers are indicative. The TTS change is the
+one clearly visible: sharing one warmed model and cutting the first chunk at ~20 characters halved
+time to first audio.
 
-### Preliminary (fake Twilio client on the same machine, not a real call)
+### Tool turns (`check_slots`, `book_slot`): 20 replies
 
-From one fake booking call (`tools/fake_twilio_call.py` playing recorded speech into the same
-media-stream protocol; 3 replies):
+| Stage | n | median (s) | p95 (s) |
+| --- | --- | --- | --- |
+| Total (server side) | 20 | 2.59 | 3.89 |
+| Turn detection | 20 | 1.00 | 1.45 |
+| Speech-to-text | 20 | 0.55 | 0.77 |
+| Model (both calls: tool call + answer) | 20 | 0.46 | 1.01 |
+| Text-to-speech | 20 | 0.82 | 1.45 |
+| Tool HTTP time | 20 | 0.015 | 0.025 |
 
-| Stage | median (s) | max (s) |
+Until 21:00 a filler line ("Let me check that.") played on every tool turn, so on most of these
+calls the first sound was the filler. That turned out to delay the actual answer by ~2s: the tool
+answers in 15 ms, but Pipecat keeps frames in order, so the tool result waited behind the filler
+audio, and callers said "hello?" into the gap, which interrupted and restarted the answer. The
+filler now plays only if a tool is still running after 0.5s. On a fake call after the change, a
+slot question was answered 2.8s after the caller stopped, with no filler.
+
+### Knowledge-base turns (`lookup_knowledge`): 2 replies
+
+| Stage | n | values (s) |
 | --- | --- | --- |
-| Total (server side) | 2.36 | 2.51 |
-| Turn detection | 1.00 | 1.00 |
-| STT time to first byte | 0.37 | 0.77 |
-| LLM time to first token | 0.45 | 0.54 |
-| TTS time to first audio | 0.48 | 0.78 |
-| Tool HTTP time (`check_slots`, `book_slot`) | 0.022 | 0.022 |
+| Total (server side) | 2 | 2.75, 7.11 |
+| Model (two calls) | 2 | 0.30, 1.27 |
+| Text-to-speech | 2 | 1.32, 3.61 |
+| Lookup itself | 2 | < 0.001 |
 
-Across earlier fake calls Kokoro's time to first audio ranged from 0.42s (one word) to 2.8s (a long
-first sentence).
+Too few for a median. What the lookup adds is a second model call (~0.3-0.8s on Groq). The search
+itself runs in-process in under 1 ms (`tools[].ms` per run). The 7.1s reply came from a long first
+sentence on the per-call Kokoro model, fixed since. On a fake call after the TTS fix, a knowledge
+turn took 4.1s (two model calls, then TTS).
 
 ---
 
@@ -97,18 +119,21 @@ multiplies the list prices in [pricing.json](pricing.json) by usage measured fro
 | Server: AWS EC2 c7i.large, Mumbai, on-demand | $0.08925/hour | [aws.amazon.com/ec2/pricing/on-demand](https://aws.amazon.com/ec2/pricing/on-demand/) |
 | USD → INR | ₹93.3461 | [RBI / FBIL reference rate](https://www.rbi.org.in/), 2026-11-19 |
 
-**Usage assumptions**: measured per call-minute from call records (LLM prompt, cached and output
-tokens; characters the agent spoke). **PENDING REAL CALLS**: the table below uses one fake call
-(6,020 prompt + 784 cached + 381 output tokens and 524 agent characters per minute) and will be
-regenerated.
+**Usage assumptions**: measured per call-minute from the 8 real calls over 20s (10.2 call-minutes):
+**7,410 prompt + 1,838 cached + 1,005 output tokens per minute**, and **452 characters spoken by the
+agent per minute**. The prompt is large because the whole context, including tool definitions, is
+re-sent on every model call, and tool turns make two calls.
 
 | | Raw (list prices) | Realistic |
 | --- | --- | --- |
-| Inbound | ₹1.83/min · ₹5,498/day | ₹3.05/min · ₹9,156/day |
-| Outbound | ₹5.67/min · ₹17,008/day | ₹8.73/min · ₹26,191/day |
+| Inbound | **₹1.89/min** · ₹5,684/day | **₹3.14/min** · ₹9,408/day |
+| Outbound | **₹5.73/min** · ₹17,193/day | **₹8.81/min** · ₹26,442/day |
 
-Raw inbound per minute: telephony ₹1.20, STT ₹0.45, LLM ₹0.11, server ₹0.07, TTS ₹0.
-Telephony is 66% of raw inbound and 89% of raw outbound.
+Raw inbound per minute: telephony ₹1.20, STT ₹0.45, LLM ₹0.17, server ₹0.07, TTS ₹0.
+Telephony is 64% of raw inbound and 88% of raw outbound.
+
+For comparison, the 9 real calls that connected cost ₹5.19-11.49 each by the same per-call formula
+(`GET /calls/{id}` → `cost`), almost all of it outbound telephony billed by the started minute.
 
 **Hidden costs included in "realistic"** (assumptions in `REALISTIC` in `tools/cost_model.py`):
 
@@ -126,20 +151,40 @@ GPU), engineering and on-call time.
 
 ---
 
-## 3. Interruption test: PENDING REAL CALLS
+## 3. Interruption test
 
-**Method:** 10 interruptions on one real call: talk over the agent mid-sentence with a real phrase
-("wait", "actually, Tuesday"). Also try 3 backchannels ("mm-hmm", "okay") that should *not* interrupt.
+**Method.** Every time the caller talked over the agent on the real calls, measured on **Twilio's
+recording** (made at Twilio's edge, caller and agent on separate channels, so it is what the caller
+heard minus the phone leg) with `python tools/measure.py twilio <call_id>`. Time to go quiet = from
+the caller's first sound to the agent's last sound, energy-based per channel. "Clean" = the agent
+stopped, didn't carry on its old sentence, and answered what was said, judged from the call's
+transcript (not by listening). These are the natural interruptions from 4 calls, not one dedicated
+10-interruption call: that call wasn't made, to stay inside the trial credit.
 
-- **Handled cleanly** = the agent stops, doesn't resume the old sentence, and answers what was said.
-  Judged by listening to the recording.
-- **Time to go quiet** = from the caller's first sound to the agent's last sound, measured on our
-  stereo recording with `python tools/measure.py audio data/recordings/<id>.wav` (energy-based
-  speech detection per channel), and on Twilio's recording for what the caller actually heard.
+**Voice-based interruptions (current rule), 10 interruptions:**
 
-| # | Phrase | Clean? | Quiet after (s), server | Quiet after (s), Twilio edge |
-| --- | --- | --- | --- | --- |
-| 1–10 | | | | |
+| # | Call | Caller said | Agent was saying | Quiet after (s) | Clean? |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2efec | "Hello" | the greeting | 0.98 | yes |
+| 2 | 2efec | "I am Sanjay" | "Good morning, Bright Smile Dental, …" | 0.78 | yes: "Which day…, Sanjay?" |
+| 3 | 2efec | "Hello, hello, hello" | "We have slots at nine o'clock, …" | 0.84 | no: carried on listing times |
+| 4 | 2efec | "nine o'clock" ×3 | "nine o'clock, nine thirty, …" | 1.02 | yes: confirmed nine o'clock |
+| 5 | a4255 | "Hello?" | the greeting | 1.18 | yes |
+| 6 | a4255 | "nine o'clock" ×2, heard as "Handbook" (Nova-3) | "We have openings tomorrow at nine…" | 0.74 | no: misheard, carried on |
+| 7 | aaf21 | "Hello?" | "…which day would you like…?" | 0.48 | yes: asked again |
+| 8 | 4b2d5 | "Hello" | the greeting | 1.18 | yes |
+| 9 | 4b2d5 | speech the recogniser returned no words for | "We have openings at eleven…" | 1.40 | stopped; resumed after 2s by design |
+| 10 | 4b2d5 | "Eleven o'clock" | "eleven, eleven thirty, …" | 0.86 | yes: asked for the name |
+
+**All 10 stopped**, median **0.92s**, max 1.40s to go quiet at Twilio's edge (this includes the
+~0.3s server → Twilio leg). **7 of 10 clean.** The 3 that weren't came from the words, not the
+stopping: a misrecognition (#6), no words at all (#9), and "hello" taken as a cue to carry on (#3).
+
+**Word-based interruptions (first rule, first 3 calls), 9 overlaps:** median **1.30s**, max 4.96s
+to go quiet, and one short "hello" over a time offer never stopped the agent.
+
+Backchannels ("mm-hmm") were not tested separately. Under the current rule they interrupt too (see
+below).
 
 **Why the rule changed after the first real calls.** The first version interrupted only on words
 from the recogniser, so a cough or "mm-hmm" never stopped the agent. On real calls that was too slow:
@@ -159,22 +204,30 @@ fix, not built: pause on voice and resume if the words turn out to be a backchan
 
 ## 4. What I would change first
 
-**To cut latency** (expected effects are estimates until measured):
+**To cut latency** (expected effects are estimates):
 
-1. **TTS**: Kokoro on a laptop CPU takes 0.45–2.8s to first audio. A streaming TTS with low first-byte
-   latency (e.g. Cartesia) or Kokoro on a GPU should bring that under 0.3s: the largest and most
-   variable stage.
-2. **Turn detection**: the fixed 0.8s pause is in every reply. A turn model (Pipecat's Smart Turn v3)
-   with the timeout kept as a fallback could end most turns sooner. MediConnect saw Smart Turn cut
-   people off, so it needs tuning on real calls first.
-3. **Co-location**: run the server in the same region as Twilio's media edge, the STT and the LLM,
-   and behind a fixed host instead of a laptop on ngrok.
+1. **Turn detection: 1.0s of every reply.** The fixed 0.8s pause after a 0.2s VAD stop is now the
+   largest stage. A turn model (Pipecat's Smart Turn v3) with the timeout as a fallback could end
+   most turns in ~0.3s. MediConnect saw Smart Turn cut people off, so it needs tuning on real calls.
+   Expected: -0.5s median.
+2. **TTS: 0.57-1.05s median, up to 3.6s.** Kokoro on a laptop CPU needs 0.6-1.2s for even a short
+   phrase, and more under load (benchmarked warm, 18-25 characters, server running). A streaming TTS with low first-byte latency, or Kokoro on a GPU, should
+   bring it under 0.3s. Expected: -0.5s median, and most of the p95.
+3. **Network: 0.59s Twilio ↔ server round trip.** The audio goes India → Twilio (US) → ngrok →
+   a laptop in India and back. A server next to Twilio's media region, or an Indian number on an
+   Indian provider, removes most of it. Expected: -0.3 to -0.5s.
 
 **To cut cost:**
 
-1. **Telephony** (66–89% of the bill): an Indian number on an Indian provider (Exotel or Plivo) or a
-   SIP trunk instead of a US Twilio number plus Media Streams.
-2. **STT**: at this volume, self-host the recogniser on a GPU shared by many calls, or negotiate a
-   committed-use rate.
-3. **LLM**: prompt caching is already 50% off cached input; trim the context and try `gpt-oss-20b`
-   ($0.075 / $0.30 per 1M) for routine turns.
+1. **Telephony (64-88% of the bill):** an Indian number on an Indian provider (Exotel or Plivo) or a
+   SIP trunk instead of a US Twilio number plus Media Streams. Outbound to Indian mobiles is ₹5.04 of
+   the ₹5.73 raw minute.
+2. **STT (₹0.45/min):** at this volume, self-host the recogniser on a GPU shared by many calls, or a
+   committed-use rate. Deepgram was tested here (section 1 setup notes) and rejected on accuracy.
+3. **LLM (₹0.17/min):** prompt caching already halves cached input. Trim tool definitions from the
+   context and try `gpt-oss-20b` ($0.075 / $0.30 per 1M) for routine turns.
+
+**Not done because of the trial / free-tier limits** (as the brief allows): an inbound call from an
+Indian phone (dialling the US trial number needs ISD balance; inbound is tested with
+`tools/fake_twilio_call.py`, which speaks Twilio's media-stream protocol), and a dedicated
+10-interruption call.

@@ -8,25 +8,25 @@ JSON. When a call ends its record (transcript, tools, recording, latency, cost) 
 
 ## 1. Where the time goes in one reply
 
-Measured server side per turn by Pipecat's latency observer (REPORT.md §1). On a fake call, about
-2.4s from the caller stopping to the agent's first audio:
+Measured server side per reply by Pipecat's latency observer over 38 replies on 10 real calls
+(REPORT.md §1): median **2.71s**, p95 4.44s from the caller stopping to the agent's first audio.
 
-| Stage | Time | Why |
+| Stage | Median (p95) | Why |
 | --- | --- | --- |
-| Turn detection | ~1.0s | 0.2s VAD stop + 0.8s speech timeout before the turn counts as over |
-| STT final | 0.3–0.8s | mostly overlaps the turn wait; the last words finalise after it |
-| LLM first token | 0.25–1.1s | Groq gpt-oss-120b, reasoning low; tool turns run the model twice |
-| TTS first audio | 0.45–2.8s | Kokoro on CPU synthesises a whole chunk before any audio |
-| Network | not visible server side | phone ↔ Twilio ↔ server, both ways (measured from Twilio's recording) |
+| Turn detection | 1.00s (1.49) | 0.2s VAD stop + 0.8s speech timeout before the turn counts as over |
+| STT final | 0.54s (0.85) | overlaps the turn wait; the last words finalise during it |
+| LLM first token | 0.45s (1.01) | Groq gpt-oss-120b, reasoning low; tool turns run the model twice |
+| TTS first audio | 0.90s (1.60); 0.57s on the final setup | Kokoro on CPU synthesises a whole chunk before any audio |
+| Network | 0.59s round trip | phone ↔ Twilio (US) ↔ ngrok ↔ laptop in India, from Twilio's own recording |
 
 Three biggest changes:
 
-1. **Faster first audio from TTS**: a streaming TTS with low first-byte latency, or Kokoro on a GPU.
-   Largest and most variable stage.
-2. **Smarter end of turn**: a turn model that recognises a finished sentence and ends the turn
-   before 0.8s, with the timeout as a fallback for unclear cases.
-3. **Fewer network hops**: server, STT and LLM in one region near Twilio's media edge; no laptop or
-   tunnel in the path.
+1. **Smarter end of turn**: a turn model that recognises a finished sentence and ends the turn
+   before the 0.8s pause, with the timeout as a fallback. The pause is now the largest stage.
+2. **Faster first audio from TTS**: a streaming TTS with low first-byte latency, or Kokoro on a GPU.
+   Already halved on CPU by sharing one warm model and a short first chunk.
+3. **Fewer network hops**: server, STT and LLM in one region near Twilio's media edge, or an Indian
+   number and provider; no laptop or tunnel in the path.
 
 ## 2. Paid API or self-host, per part
 

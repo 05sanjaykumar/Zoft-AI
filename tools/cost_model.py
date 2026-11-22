@@ -52,11 +52,14 @@ REALISTIC = {
 def measured_usage() -> tuple[dict, str]:
     from app.config import DATA_DIR
 
+    from app.calls.latency_stats import is_real_call
+
     calls = [json.loads(p.read_text()) for p in (DATA_DIR / "calls").glob("*.json")]
-    calls = [c for c in calls if (c.get("duration_seconds") or 0) > 20 and c.get("usage")]
+    # Real Twilio calls only: fake-client calls are short scripted turns.
+    calls = [c for c in calls if is_real_call(c) and (c.get("duration_seconds") or 0) > 20 and c.get("usage")]
     minutes = sum(c["duration_seconds"] for c in calls) / 60
     if not calls or minutes == 0:
-        return DEFAULTS, "defaults (no call records over 20s yet)"
+        return DEFAULTS, "defaults (no real calls over 20s yet)"
     total = lambda key: sum(c["usage"].get(key, 0) for c in calls)
     usage = {
         "llm_prompt_tokens_per_min": total("llm_prompt_tokens") / minutes,
@@ -64,7 +67,7 @@ def measured_usage() -> tuple[dict, str]:
         "llm_completion_tokens_per_min": total("llm_completion_tokens") / minutes,
         "agent_chars_per_min": total("tts_characters") / minutes,
     }
-    return usage, f"measured from {len(calls)} calls, {minutes:.1f} call-minutes"
+    return usage, f"measured from {len(calls)} real calls, {minutes:.1f} call-minutes"
 
 
 def per_minute_raw(p: dict, u: dict, direction: str) -> dict[str, float]:

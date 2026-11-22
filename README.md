@@ -158,12 +158,12 @@ HTTP errors and timeouts to the model. No test places a real call.
 
 ## Status
 
-**Working (verified on fake Twilio calls):** inbound webhook and media stream, agent-first greeting,
+**Working (verified on 10 real outbound calls on the Twilio trial, plus fake-client calls for inbound):** inbound webhook and media stream, agent-first greeting,
 streaming STT → LLM → TTS, `check_slots` called mid-call with the right date, mock clinic with the
 double-booking guard, `POST /calls` (inbound config + outbound dial), `GET /calls/:id`,
 `POST /calls/:id/end`, Twilio status callback, tool runs logged on the call, and the call controls below.
 
-| Control | How | Fake-call result |
+| Control | How | Result (fake or real calls, as noted) |
 | --- | --- | --- |
 | Interruptions | Voice starts a turn: Silero VAD tuned for 8 kHz phone audio (confidence 0.5, min volume 0.2); words from the recogniser are the backup; a turn with no words resumes the cut-off reply ([app/voice/turns.py](app/voice/turns.py)) | Changed after real calls: the words-only rule took 1.2-1.7s at Twilio's edge (the recogniser needs 1.0-1.3s for a first word) and missed one short "hello". VAD caught all 9 utterances on that call ~0.25s in. Trade-off: "mm-hmm" now interrupts too |
 | Filler during tools | `on_function_calls_started` starts a 0.5s timer; if the tool is still running then, "Let me check that." plays (not if the model already spoke); kept out of the history | Changed after real calls: an always-on filler delayed the answer ~2s behind its own audio (the tool takes ~20 ms), and callers said "hello?" into the gap |
@@ -178,19 +178,22 @@ double-booking guard, `POST /calls` (inbound config + outbound dial), `GET /call
 
 Twilio hangs up only after the last line finishes ("Bot stopped speaking" comes before the end frame in the logs).
 
-**After the call** (verified on a fake booking call): `GET /calls/{id}` and the webhook carry a
+**After the call** (verified on real calls): `GET /calls/{id}` and the webhook carry a
 per-turn transcript with timestamps, every tool run with inputs, result and time, a stereo recording,
 per-turn latency (caller stopped → agent's first audio, split into STT / LLM / TTS / tools), usage
 (tokens, audio seconds, characters) and a cost breakdown per component in rupees. A 39-second
 inbound booking call cost ₹1.60: telephony ₹1.20 (one billed minute), STT ₹0.28, LLM ₹0.07,
 server ₹0.05, TTS ₹0. Prices and their sources are in [pricing.json](pricing.json).
 
-**Not verified yet:** any of this on a real phone line, outbound dialling, and the Hindi voice by ear.
+**Not verified on a real line:** an inbound call. Dialling the US trial number from an Indian phone
+needs ISD balance, so inbound is tested with `tools/fake_twilio_call.py`, which speaks Twilio's
+webhook and media-stream protocol. Before taking real inbound calls, point the number's
+**Voice → A call comes in** webhook at `https://<PUBLIC_HOST>/twilio/voice` (it still points at an
+older project). Also not checked: the Hindi voice by ear.
 
-**Next:**
-
-- [ ] Real phone calls: 30+ measured turns, 10 interruptions → fill the PENDING sections of [REPORT.md](REPORT.md)
-- [ ] Demo video
+**Measured results** are in [REPORT.md](REPORT.md): 38 replies over 10 real calls (median 2.71s server
+side, p95 4.44s), 10 interruptions (median 0.92s to go quiet at Twilio's edge), cost per minute from
+real usage.
 
 ## Measuring (for REPORT.md)
 
@@ -198,17 +201,8 @@ server ₹0.05, TTS ₹0. Prices and their sources are in [pricing.json](pricing
 # in .env for measurement calls only: Twilio records each call at its edge ($0.0025/min)
 TWILIO_DUAL_RECORDING=true
 
-python tools/measure.py latency --since 2026-11-20      # median / p95 per stage, plain vs tool turns
+python tools/measure.py latency --since 2026-11-20      # median / p95 per stage, real calls only
 python tools/measure.py audio data/recordings/<id>.wav  # reply gaps and interruption stop times
 python tools/measure.py twilio <id>                     # adds the Twilio <-> server round trip
 python tools/cost_model.py                              # 1,000 calls/day x 3 min, raw and realistic, in ₹
 ```
-
-**Latency findings so far (fake calls, local machine, server side):**
-
-- Caller stopped → agent's first audio: 1.9–2.5s on the booking call's three replies. About 1.0s of
-  that is turn detection (0.2s VAD + 0.8s speech timeout).
-- Kokoro's time to first audio varied from 0.45s to 2.8s across runs (one word: 0.42s). Line length,
-  CPU contention and warm-up are the suspects; to be measured.
-- On a tool turn, the model's answer waits for the filler line to finish playing (about 1.8s once).
-- STT 0.26–0.78s, Groq LLM 0.24–1.1s, `check_slots` / `book_slot` 16–34 ms.
